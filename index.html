@@ -1034,10 +1034,7 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
       <!-- STATUS STRIP (reaproveitado da aba fat, reposicionado via JS) -->
       <!-- FILTERBAR EST (hidden until goTab activates) -->
       <div class="filterbar fb-est" id="fb-est-mb" style="display:none">
-        <!-- Linha 1: Núcleos + Filial -->
-        <span class="flbl">Núcleos</span>
-        <div class="chips" id="chips-est-nucleo-mb"></div>
-        <div class="fsep"></div>
+        <!-- Linha 1: Filial -->
         <span class="flbl">Filial</span>
         <div class="chips" id="chips-est-fil-mb"></div>
         <!-- Linha 2: Técnico + Curva + Mobilidade + Grupo + Carregar -->
@@ -10336,7 +10333,7 @@ function getEstAllItems(env){
 function getEstFiltered(env){
   const f=EST_F[env];
   return getEstAllItems(env).filter(i=>
-    (f.filiais.size===0||f.filiais.has(i.filial))&&
+    (f.filiais.size===0||f.filiais.has('all')||f.filiais.has(i.filial))&&
     (f.tec.size===0||f.tec.has(i.tec))&&
     (f.curvas.size===0||f.curvas.has(i.curva))&&
     (f.mobs.size===0||f.mobs.has(i.mobCls))&&
@@ -10371,53 +10368,40 @@ function initEstFilters(env){
   EST_F[env].tec=new Set(['SIM','NÃO']);
   EST_F[env].grupos=new Set(); // vazio = todos passam
 
-  // Núcleo chips
-  const nc=document.getElementById(`chips-est-nucleo-${env}`);
-  if(nc){
-    nc.innerHTML='';
-    // Chip "Todos"
-    const chAll=document.createElement('button');
-    chAll.className='chip on-'+env; chAll.textContent='Todos';
-    chAll.onclick=()=>{
-      EST_F[env].filiais=new Set(filiais);
-      nc.querySelectorAll('.chip').forEach(c=>c.classList.add('on-'+env));
-      const fcEl=document.getElementById(`chips-est-fil-${env}`);
-      if(fcEl) fcEl.querySelectorAll('.chip').forEach(c=>c.classList.add('on-'+env));
-      renderEstoque(env);
-    };
-    nc.appendChild(chAll);
-    // Chips por núcleo
-    const nucleosEst=[...new Set(filiais.map(f=>getNucleo(f)).filter(Boolean))].sort();
-    nucleosEst.forEach(n=>{
-      const ch=document.createElement('button');
-      ch.className='chip on-'+env; ch.textContent=n;
-      ch.onclick=()=>{
-        // Filtrar filiais deste núcleo
-        const filsNucleo=NUCLEOS_DEF.find(nd=>nd.nome===n)?.filiais||[];
-        EST_F[env].filiais=new Set(filiais.filter(f=>filsNucleo.includes(f)));
-        // Atualizar chips de filial
-        const fcEl=document.getElementById(`chips-est-fil-${env}`);
-        if(fcEl) fcEl.querySelectorAll('.chip').forEach(c=>{
-          const ativo=EST_F[env].filiais.has(c.textContent.trim());
-          c.classList.toggle('on-'+env, ativo);
-        });
-        // Highlight só este núcleo
-        nc.querySelectorAll('.chip').forEach(c=>c.classList.remove('on-'+env));
-        ch.classList.add('on-'+env);
-        renderEstoque(env);
-      };
-      nc.appendChild(ch);
-    });
-  }
-
-  // Filial chips
+  // Filial chips — "Todas" por padrão, clique individual filtra
+  EST_F[env].filiais = new Set(['all']); // inicia com todas
   const fc=document.getElementById(`chips-est-fil-${env}`);
   if(fc){
     fc.innerHTML='';
+    // Chip Todas
+    const chTodas=document.createElement('button');
+    chTodas.className='chip on-'+env; chTodas.textContent='Todas'; chTodas.dataset.val='all';
+    chTodas.onclick=()=>{
+      EST_F[env].filiais=new Set(['all']);
+      fc.querySelectorAll('.chip').forEach(c=>c.classList.remove('on-'+env));
+      chTodas.classList.add('on-'+env);
+      renderEstoque(env);
+    };
+    fc.appendChild(chTodas);
+    // Chips individuais
     filiais.forEach(f=>{
       const ch=document.createElement('button');
-      ch.className='chip on-'+env; ch.textContent=f;
-      ch.onclick=()=>{ ch.classList.toggle('on-'+env); EST_F[env].filiais[ch.classList.contains('on-'+env)?'add':'delete'](f); renderEstoque(env); };
+      ch.className='chip'; ch.textContent=f; ch.dataset.val=f;
+      ch.onclick=()=>{
+        // Desativar "Todas"
+        chTodas.classList.remove('on-'+env);
+        ch.classList.toggle('on-'+env);
+        // Recalcular filtro
+        const sels=[...fc.querySelectorAll('.chip')].filter(c=>c.dataset.val!=='all'&&c.classList.contains('on-'+env)).map(c=>c.dataset.val);
+        if(!sels.length){
+          // Nenhuma individual selecionada → volta para Todas
+          EST_F[env].filiais=new Set(['all']);
+          chTodas.classList.add('on-'+env);
+        } else {
+          EST_F[env].filiais=new Set(sels);
+        }
+        renderEstoque(env);
+      };
       fc.appendChild(ch);
     });
   }
@@ -10611,7 +10595,7 @@ function renderEstoque(env){
   // allItemsFil: sem filtro de técnico — usado APENAS para o card Valor Total (referência)
   const _rf=EST_F[env];
   const allItemsFil=getEstAllItems(env).filter(i=>
-    (_rf.filiais.size===0||_rf.filiais.has(i.filial))&&
+    (_rf.filiais.size===0||_rf.filiais.has('all')||_rf.filiais.has(i.filial))&&
     (_rf.curvas.size===0||_rf.curvas.has(i.curva))&&
     (_rf.mobs.size===0||_rf.mobs.has(i.mobCls))
   );
@@ -11011,7 +10995,7 @@ function renderEstEvolucao(env){
   const vals=keys.map(k=>{
     // Only show if period selected
     if(!EST_F[env].periodos.has(k)) return null;
-    const its=snaps[k].filter(i=>EST_F[env].filiais.has(i.filial));
+    const its=snaps[k].filter(i=>EST_F[env].filiais.has('all')||EST_F[env].filiais.has(i.filial));
     return its.reduce((s,i)=>s+i.valor,0);
   });
 
@@ -11034,7 +11018,7 @@ function renderEstEvolucao(env){
 
   // Total do(s) período(s) selecionado(s) em destaque
   const totalSel = keys.filter(k=>EST_F[env].periodos.has(k))
-    .reduce((s,k)=>s+snaps[k].filter(i=>EST_F[env].filiais.has(i.filial)).reduce((a,i)=>a+i.valor,0),0);
+    .reduce((s,k)=>s+snaps[k].filter(i=>EST_F[env].filiais.has('all')||EST_F[env].filiais.has(i.filial)).reduce((a,i)=>a+i.valor,0),0);
   const totBox=document.getElementById(`est-evo-total-${env}`);
   if(totBox) totBox.innerHTML=`<div style="display:inline-block;background:var(--mb)18;border:1px solid var(--mb)44;border-radius:10px;padding:6px 20px;text-align:center">
     <div style="font-family:'Syne',sans-serif;font-weight:900;font-size:26px;color:var(--mb)">${fRFull(totalSel)}</div>
