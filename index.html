@@ -10371,6 +10371,45 @@ function initEstFilters(env){
   EST_F[env].tec=new Set(['SIM','NÃO']);
   EST_F[env].grupos=new Set(); // vazio = todos passam
 
+  // Núcleo chips
+  const nc=document.getElementById(`chips-est-nucleo-${env}`);
+  if(nc){
+    nc.innerHTML='';
+    // Chip "Todos"
+    const chAll=document.createElement('button');
+    chAll.className='chip on-'+env; chAll.textContent='Todos';
+    chAll.onclick=()=>{
+      EST_F[env].filiais=new Set(filiais);
+      nc.querySelectorAll('.chip').forEach(c=>c.classList.add('on-'+env));
+      const fcEl=document.getElementById(`chips-est-fil-${env}`);
+      if(fcEl) fcEl.querySelectorAll('.chip').forEach(c=>c.classList.add('on-'+env));
+      renderEstoque(env);
+    };
+    nc.appendChild(chAll);
+    // Chips por núcleo
+    const nucleosEst=[...new Set(filiais.map(f=>getNucleo(f)).filter(Boolean))].sort();
+    nucleosEst.forEach(n=>{
+      const ch=document.createElement('button');
+      ch.className='chip on-'+env; ch.textContent=n;
+      ch.onclick=()=>{
+        // Filtrar filiais deste núcleo
+        const filsNucleo=NUCLEOS_DEF.find(nd=>nd.nome===n)?.filiais||[];
+        EST_F[env].filiais=new Set(filiais.filter(f=>filsNucleo.includes(f)));
+        // Atualizar chips de filial
+        const fcEl=document.getElementById(`chips-est-fil-${env}`);
+        if(fcEl) fcEl.querySelectorAll('.chip').forEach(c=>{
+          const ativo=EST_F[env].filiais.has(c.textContent.trim());
+          c.classList.toggle('on-'+env, ativo);
+        });
+        // Highlight só este núcleo
+        nc.querySelectorAll('.chip').forEach(c=>c.classList.remove('on-'+env));
+        ch.classList.add('on-'+env);
+        renderEstoque(env);
+      };
+      nc.appendChild(ch);
+    });
+  }
+
   // Filial chips
   const fc=document.getElementById(`chips-est-fil-${env}`);
   if(fc){
