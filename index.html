@@ -700,7 +700,7 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
       <div class="home-desc">Mercedes-Benz<br>Veículos Comerciais</div>
       <div class="home-badge" style="background:rgba(10,140,220,.12);color:var(--mb);border:1px solid rgba(10,140,220,.2)">AMBIENTE MB</div>
     </div>
-    <div class="home-card mc-card" onclick="enterEnv('mc')" id="home-card-mc">
+    <div class="home-card mc-card" onclick="enterEnv('mc')" id="home-card-mc" style="display:none">
       <div class="home-icon">🟡</div>
       <div class="home-title" style="color:var(--mc)">Pneus</div>
       <div class="home-desc">Michelin<br>Gestão Comercial</div>
@@ -816,7 +816,7 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
     <div class="chips" id="fNucleoMB">
       <div class="chip on-mb" onclick="fAllNucleo('mb',this)">Todos</div>
       <div class="chip" onclick="fTogNucleo('mb',this,'Afabio')">Afabio</div>
-      <div class="chip" onclick="fTogNucleo('mb',this,'Edivaldo')">Edivaldo</div>
+      <div class="chip" onclick="fTogNucleo('mb',this,'Edvaldo')">Edvaldo</div>
       <div class="chip" onclick="fTogNucleo('mb',this,'Carmo')">Carmo</div>
       <div class="chip" onclick="fTogNucleo('mb',this,'Bertoco')">Bertoco</div>
     </div>
@@ -909,34 +909,6 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
       <div class="mb12">
         <div class="cc" style="margin-bottom:0"><div class="cc-hd"><div><div class="cc-title">Faturamento por Canal · Mês a Mês</div></div><span class="badge bb">CANAIS</span></div><div class="cw"><canvas id="c-mb-canais"></canvas></div></div>
       </div>
-      <!-- OS - sidebar + table -->
-      <div class="sh"><div><div class="sh-title">Por Tipo de OS</div><div class="sh-sub">Checkbox lateral · colunas por ano · ordenação e filtro</div></div></div>
-      <div class="seg-layout mb12">
-        <div class="seg-sidebar">
-          <div class="seg-sidebar-title">🗂 Tipos de OS</div>
-          <div class="seg-all-btns">
-            <button class="seg-all-btn" onclick="osAll(true)">✓ Todos</button>
-            <button class="seg-all-btn" onclick="osAll(false)">✗ Nenhum</button>
-          </div>
-          <div id="os-checks-mb" style="max-height:340px;overflow-y:auto;"></div>
-        </div>
-        <div>
-          <div class="cc" style="margin-bottom:0">
-            <div class="cc-hd">
-              <div><div class="cc-title">Faturamento por Tipo de OS · Por Ano</div><div class="cc-sub">Faturamento acumulado · Margem % · Qtd OS · colunas por ano selecionado</div></div>
-              <span class="badge ba">TIPOS OS</span>
-            </div>
-            <div style="display:flex;gap:7px;margin-bottom:9px;align-items:center;">
-              <input id="os-search" type="text" placeholder="🔍 Filtrar código ou descrição…"
-                style="flex:1;background:var(--card2);border:1px solid var(--brd);border-radius:6px;padding:5px 10px;color:var(--txt);font-size:12px;font-family:'DM Sans',sans-serif;outline:none;"
-                oninput="renderTblOS(getRowsOS('mb'),'mb')"
-                onfocus="this.style.borderColor='var(--mb)'" onblur="this.style.borderColor='var(--brd)'">
-              <div class="chips" id="os-anos-mb"></div>
-            </div>
-            <div class="tbl-wrap"><div id="tbl-os-mb"></div></div>
-          </div>
-        </div>
-      </div>
       <!-- ══ SUB-NAV: Segmentos | Vendedores | Clientes ══ -->
       <div style="display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid var(--brd);padding-bottom:4px" id="fat-subnav-mb">
         <button class="ntab mb-on" id="fstab-seg-mb"   onclick="goFatSub('mb','seg',this)">📊 Por Segmento</button>
@@ -969,6 +941,35 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
         </div>
       </div>
       </div><!-- /fat-pg-seg-mb -->
+
+      <!-- OS - sidebar + table -->
+      <div class="sh"><div><div class="sh-title">Por Tipo de OS</div><div class="sh-sub">Checkbox lateral · colunas por ano · ordenação e filtro</div></div></div>
+      <div class="seg-layout mb12">
+        <div class="seg-sidebar">
+          <div class="seg-sidebar-title">🗂 Tipos de OS</div>
+          <div class="seg-all-btns">
+            <button class="seg-all-btn" onclick="osAll(true)">✓ Todos</button>
+            <button class="seg-all-btn" onclick="osAll(false)">✗ Nenhum</button>
+          </div>
+          <div id="os-checks-mb" style="max-height:340px;overflow-y:auto;"></div>
+        </div>
+        <div>
+          <div class="cc" style="margin-bottom:0">
+            <div class="cc-hd">
+              <div><div class="cc-title">Faturamento por Tipo de OS · Por Ano</div><div class="cc-sub">Faturamento acumulado · Margem % · Qtd OS · colunas por ano selecionado</div></div>
+              <span class="badge ba">TIPOS OS</span>
+            </div>
+            <div style="display:flex;gap:7px;margin-bottom:9px;align-items:center;">
+              <input id="os-search" type="text" placeholder="🔍 Filtrar código ou descrição…"
+                style="flex:1;background:var(--card2);border:1px solid var(--brd);border-radius:6px;padding:5px 10px;color:var(--txt);font-size:12px;font-family:'DM Sans',sans-serif;outline:none;"
+                oninput="renderTblOS(getRowsOS('mb'),'mb')"
+                onfocus="this.style.borderColor='var(--mb)'" onblur="this.style.borderColor='var(--brd)'">
+              <div class="chips" id="os-anos-mb"></div>
+            </div>
+            <div class="tbl-wrap"><div id="tbl-os-mb"></div></div>
+          </div>
+        </div>
+      </div>
 
       <!-- ── VENDEDORES panel ── -->
       <div id="fat-pg-vend-mb" style="display:none">
@@ -7225,7 +7226,7 @@ function mapFilial(filialDMS){
 // ── Núcleos: mapeamento de filiais por diretor ─────────────────
 const NUCLEOS = [
   { nome:'Afabio',   filiais:['Itapeva','Itu','Sorocaba','Alumínio'] },
-  { nome:'Edivaldo', filiais:['DN SJC','Roseira'] },
+  { nome:'Edvaldo', filiais:['DN SJC','Roseira'] },
   { nome:'Carmo',    filiais:['SBC','Demarchi'] },
   { nome:'Bertoco',  filiais:['Limão','Guarulhos'] },
 ];
@@ -8897,7 +8898,7 @@ const BUILTIN_USERS = [
   { id:'__fabio__',   nome:'Fabio Freitas',  login:'afabio.freitas', senha:'bc2e1f676370b8131e3a1f84fc6c1cd6c9266f279030c92604fde8cfa8a1e0d3', role:'full',    filiais:[], nucleo:null, modulos:[] },
   { id:'__giovane__', nome:'Giovane Silva',  login:'giovane.silva',  senha:'bc2e1f676370b8131e3a1f84fc6c1cd6c9266f279030c92604fde8cfa8a1e0d3', role:'full',    filiais:[], nucleo:null, modulos:[] },
   { id:'__rodrigo__', nome:'Rodrigo Pulgas', login:'rodrigo.pulgas', senha:'bc2e1f676370b8131e3a1f84fc6c1cd6c9266f279030c92604fde8cfa8a1e0d3', role:'full',    filiais:['Itu','Sorocaba','Itapeva','Alumínio'], nucleo:'Afabio',  modulos:[], primeiroAcesso:true },
-  { id:'__marcelo__', nome:'Marcelo Santos', login:'marcelo.santos', senha:'bc2e1f676370b8131e3a1f84fc6c1cd6c9266f279030c92604fde8cfa8a1e0d3', role:'consult', filiais:['DN SJC','Roseira'],                    nucleo:'Edivaldo', modulos:[], primeiroAcesso:true },
+  { id:'__marcelo__', nome:'Marcelo Santos', login:'marcelo.santos', senha:'bc2e1f676370b8131e3a1f84fc6c1cd6c9266f279030c92604fde8cfa8a1e0d3', role:'consult', filiais:['DN SJC','Roseira'],                    nucleo:'Edvaldo', modulos:[], primeiroAcesso:true },
   { id:'__arlei__',   nome:'Arlei Bethiol',  login:'arlei.bethiol',  senha:'bc2e1f676370b8131e3a1f84fc6c1cd6c9266f279030c92604fde8cfa8a1e0d3', role:'consult', filiais:['Itu','Sorocaba','Itapeva','Alumínio'], nucleo:'Afabio',  modulos:[], primeiroAcesso:true },
 ];
 
@@ -9074,7 +9075,7 @@ function authEnter(){
   const canMC=authCan('env','mc');
   // Update home cards visibility
   document.getElementById('home-card-mb').style.display=canMB?'':'none';
-  document.getElementById('home-card-mc').style.display=canMC?'':'none';
+  document.getElementById('home-card-mc').style.display='none'; // MC temporariamente oculto
   // Show user info on home
   const inf=document.getElementById('home-user-info');
   if(inf) inf.innerHTML=`Olá, <strong style="color:var(--txt)">${u.nome}</strong> &nbsp;·&nbsp; <span class="role-badge ${ROLE_LABELS[u.role].cls}">${ROLE_LABELS[u.role].icon} ${ROLE_LABELS[u.role].lbl}</span>`;
