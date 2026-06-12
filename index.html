@@ -10586,7 +10586,8 @@ function renderEstoque(env){
   if(sn) sn.style.display=hasData?'block':'none';
   if(!hasData) return;
   // Show visao sub-tab (default), hide others
-  const cur=_estCurTab[env]||'visao';
+  // Se aba salva for vsfat (oculta), forçar visao
+  const cur=(_estCurTab[env]==='vsfat'?'visao':_estCurTab[env])||'visao';
   ['visao','itens','cruz','vsfat'].forEach(t=>{
     const pg=document.getElementById(`est-pg-${t}-${env}`);
     if(pg) pg.style.display=t===cur?'':'none';
