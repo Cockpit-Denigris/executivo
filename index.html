@@ -1071,7 +1071,7 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
           <button class="ntab mb-on" id="esttab-visao-mb"  onclick="goEstTab('mb','visao',this)">📊 Visão Geral</button>
           <button class="ntab"       id="esttab-itens-mb"  onclick="goEstTab('mb','itens',this)">📋 Itens em Estoque</button>
           <button class="ntab"       id="esttab-cruz-mb"   onclick="goEstTab('mb','cruz',this)">🔀 Cruzamento Curvas</button>
-          <button class="ntab"       id="esttab-vsfat-mb"  onclick="goEstTab('mb','vsfat',this)" style="display:none">⚖️ Est. vs Faturamento</button>
+          <!-- Est vs Faturamento MB — oculto temporariamente -->
           <div style="flex:1"></div>
 
         </div>
@@ -1528,7 +1528,7 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
       <button class="ntab mc-on" id="esttab-visao-mc"  onclick="goEstTab('mc','visao',this)">📊 Visão Geral</button>
       <button class="ntab"       id="esttab-itens-mc"  onclick="goEstTab('mc','itens',this)">📋 Itens em Estoque</button>
       <button class="ntab"       id="esttab-cruz-mc"   onclick="goEstTab('mc','cruz',this)">🔀 Cruzamento Curvas</button>
-      <button class="ntab"       id="esttab-vsfat-mc"  onclick="goEstTab('mc','vsfat',this)" style="display:none">⚖️ Est. vs Fat.</button>
+      <!-- Est vs Faturamento MC — oculto temporariamente -->
     </div>
   </div>
   <div class="main">
@@ -3809,6 +3809,7 @@ function goTab(env,tab,btn){
 // ── Estoque sub-tab navigation ───────────────────────────────
 var _estCurTab = { mb: 'visao', mc: 'visao' };
 function goEstTab(env, tab, btn){
+  if(tab==='vsfat') tab='visao'; // vsfat oculto
   ['visao','itens','cruz','vsfat'].forEach(t=>{
     const pg=document.getElementById(`est-pg-${t}-${env}`);
     if(pg) pg.style.display = t===tab?'':'none';
