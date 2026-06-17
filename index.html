@@ -822,11 +822,9 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
     </div>
     <div class="fsep"></div>
     <span class="flbl">Filial</span>
-    <select id="fFilMB-sel" onchange="fSelFilial('mb',this)"
-      style="background:var(--card2);border:1px solid var(--brd);border-radius:6px;padding:4px 8px;color:var(--txt);font-family:'DM Sans';font-size:12px;outline:none;cursor:pointer;max-width:160px">
-      <option value="all">Todas</option>
-    </select>
-    <div class="chips" id="fFilMB" style="display:none"></div>
+    <div class="chips" id="fFilMB">
+      <div class="chip on-mb" onclick="fAllFilial('mb',this)">Todas</div>
+    </div>
     <!-- Linha 2: Ano + Mês + Depto -->
     <div class="fbr"></div>
     <div class="chips" id="main-anos-mb" style="flex-wrap:nowrap"></div>
@@ -3918,34 +3916,9 @@ function initFilialChips(env){
     wrap.appendChild(addChip);
   }
 
-  // Popular dropdown de filiais (MB)
-  if(env === 'mb'){
-    const sel = document.getElementById('fFilMB-sel');
-    if(sel){
-      const valAtual = sel.value;
-      sel.innerHTML = '<option value="all">Todas</option>';
-      filsNoDado.forEach(f => {
-        const o = document.createElement('option');
-        o.value = f; o.textContent = f;
-        sel.appendChild(o);
-      });
-      if(valAtual && [...sel.options].some(o=>o.value===valAtual)) sel.value = valAtual;
-    }
-  }
-
   console.log(`🏢 Filiais ${env.toUpperCase()} detectadas:`, filsNoDado.join(', '));
 }
 
-// Handler do dropdown de filial
-function fSelFilial(env, sel){
-  const val = sel.value;
-  if(val === 'all'){
-    F[env].filial = new Set(['all']);
-  } else {
-    F[env].filial = new Set([val]);
-  }
-  renderAll(env);
-}
 
 function initAnoChips(env){
   // Garantir que os sets de anos reflitam os dados disponíveis
