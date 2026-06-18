@@ -2422,12 +2422,8 @@ function syncOSFromFile(rows){
   TIPOS_OS_LIST.length = 0;
   validos.sort().forEach(t => TIPOS_OS_LIST.push(t));
 }
-// SEGMENTOS: lista dinâmica — começa com valores padrão, atualizada ao carregar dados reais
-let SEGMENTOS=[
-  'MBC / Bhardal','MBC / Comb e Lubrificantes','MBC / MB Caminhões',
-  'MBC / OF Novos','MBC / OF Recond','MBC / Peças Alliance',
-  'MBC / Peças MB Recond','MBC / Peças MB Vans'
-];
+// SEGMENTOS: lista dinâmica — populada exclusivamente a partir dos dados reais (sem seed fixo)
+let SEGMENTOS=[];
 
 // Atualiza lista de segmentos a partir dos dados reais e reconstrói sidebar
 function syncSegmentos(rows){
@@ -7444,6 +7440,7 @@ async function parseGrupoInternoPDF(arrayBuffer, env){
     fullText += '\n--- PAGE BREAK ---\n';
   }
 
+  console.log('📄 Grupo Interno: texto bruto extraído pelo PDF.js:\n' + fullText);
   return parseGrupoInternoText(fullText, env);
 }
 
@@ -7519,6 +7516,7 @@ function parseGrupoInternoText(text, env){
 
     // Parar ao encontrar "Totais dos Grupos" ou "Operações Consideradas"
     if(/^Totais dos Grupos/i.test(line) || /^Operações Consideradas/i.test(line)){
+      console.log(`🛑 Grupo Interno: fim da tabela detectado na linha ${i}: "${line.slice(0,40)}"`);
       inTable = false;
       continue;
     }
@@ -7527,12 +7525,18 @@ function parseGrupoInternoText(text, env){
     // Extrair todos os números no formato BR da linha
     const allNums = line.match(/-?[\d]{1,3}(?:\.[\d]{3})*,[\d]{1,2}/g) || [];
     const nCols = (colOrder||COLS_OBRIGATORIAS).length;
-    if(allNums.length < nCols) continue; // linha não tem dados suficientes (provavelmente lixo)
+    if(allNums.length < nCols){
+      console.log(`⏭️ Grupo Interno: linha ${i} pulada (${allNums.length} números, precisa ${nCols}): "${line.slice(0,60)}"`);
+      continue; // linha não tem dados suficientes (provavelmente lixo)
+    }
 
     // Nome do grupo = texto antes do primeiro número
     const firstNumIdx = line.indexOf(allNums[0]);
     const grupoNome = line.slice(0, firstNumIdx).trim().replace(/\t/g,' ').replace(/\s+/g,' ');
-    if(!grupoNome) continue;
+    if(!grupoNome){
+      console.log(`⏭️ Grupo Interno: linha ${i} pulada (nome de grupo vazio): "${line.slice(0,60)}"`);
+      continue;
+    }
 
     // Pegar exatamente N últimos números (N = quantidade de colunas detectadas no cabeçalho)
     // e mapear pela ORDEM DETECTADA — evita deslocamento quando há colunas extras (ex.: Devolvido)
@@ -7540,8 +7544,9 @@ function parseGrupoInternoText(text, env){
     if(numsRaw.length < nCols) continue;
 
     const valores = {};
-    (colOrder||COLS_ESPERADAS).forEach((col, idx) => { valores[col] = numsRaw[idx]; });
+    (colOrder||COLS_OBRIGATORIAS).forEach((col, idx) => { valores[col] = numsRaw[idx]; });
 
+    console.log(`✅ Grupo Interno: grupo extraído da linha ${i}: "${grupoNome}" — vendas=${valores.vendas}`);
     grupos.push({
       grupo: grupoNome,
       vendas: valores.vendas||0, pct: valores.pct||0, markup: valores.markup||0,
