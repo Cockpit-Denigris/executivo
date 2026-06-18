@@ -7367,6 +7367,230 @@ function parseDMSRows(rawRows, env){
   return out;
 }
 
+/* ── Parser Grupo Interno PDF (substitui o DMS · Vendas de Peças por Grupo Interno) ───
+   Estrutura do PDF:
+   - Cabeçalho: Filial: DN XXXX | Empresa: MATRIZ DE NIGRIS | Período de DD/MM/YYYY a DD/MM/YYYY
+   - Tabela: Grupo | Vendas | % | MarkUp | Balcão | Atacado | Oficina | Compras
+   - Totais dos Grupos (linha final, ignorada)
+   - Gera 2 linhas por grupo no formato interno:
+       Canal 'Telepeças/Balcão' → Fat_Real = Balcão + Atacado
+       Canal 'Oficina/Funilaria' → Fat_Real = Oficina
+   - _fonte: 'grupo_interno' (substitui 'dms' como fonte primária de fallback do DRE)
+═════════════════════════════════════════════════════════════════════════════ */
+/* ── Detector de tipo de PDF: lê só a 1ª página para decidir o parser ──
+   'grupo_interno' → Vendas de Peças por Grupo Interno (substitui DMS)
+   'fat_of'        → Resumo de Faturamento por Tipo de OS (legado)
+──────────────────────────────────────────────────────────────────────── */
+async function detectarTipoPDF(arrayBuffer){
+  if(typeof pdfjsLib === 'undefined') throw new Error('PDF.js não carregado. Verifique conexão com internet.');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  // Clonar o buffer — getDocument consome/transfere o ArrayBuffer original
+  const bufClone = arrayBuffer.slice(0);
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(bufClone),
+    disableWorker: true,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  }).promise;
+  const page = await pdf.getPage(1);
+  const content = await page.getTextContent();
+  const text = content.items.map(i=>i.str).join(' ');
+
+  if(/Grupo Interno/i.test(text) || /Vendas de Peças por Grupo/i.test(text)){
+    return 'grupo_interno';
+  }
+  if(/Resumo de Faturamento/i.test(text) || /Concessionária/i.test(text)){
+    return 'fat_of';
+  }
+  // Default: assume fat_of para não quebrar fluxo legado
+  return 'fat_of';
+}
+
+async function parseGrupoInternoPDF(arrayBuffer, env){
+  if(typeof pdfjsLib === 'undefined') throw new Error('PDF.js não carregado. Verifique conexão com internet.');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer),
+    disableWorker: true,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  }).promise;
+  let fullText = '';
+
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const byY = {};
+    content.items.forEach(item=>{
+      const y = Math.round(item.transform[5]);
+      if(!byY[y]) byY[y]=[];
+      byY[y].push({x: item.transform[4], str: item.str});
+    });
+    const ys = Object.keys(byY).map(Number).sort((a,b)=>b-a);
+    ys.forEach(y=>{
+      const lineItems = byY[y].sort((a,b)=>a.x-b.x);
+      fullText += lineItems.map(i=>i.str).join('\t') + '\n';
+    });
+    fullText += '\n--- PAGE BREAK ---\n';
+  }
+
+  return parseGrupoInternoText(fullText, env);
+}
+
+function parseGrupoInternoText(text, env){
+  const lines = text.split('\n').map(l=>l.trim()).filter(l=>l);
+
+  function pNumGI(s){
+    return parseFloat(String(s||'').replace(/\./g,'').replace(',','.'))||0;
+  }
+
+  // ── Extrair cabeçalho: Filial, Período (mês/ano) ──
+  let filialNome='', periodoStr='', mes=0, ano=0;
+  for(let i=0;i<Math.min(20,lines.length);i++){
+    const l=lines[i];
+    const filM=l.match(/Filial[:\s\t]+(.+)/i);
+    if(filM) filialNome = mapFilial(filM[1].trim());
+    const perM=l.match(/(\d{2}\/\d{2}\/\d{4})\s*a\s*(\d{2}\/\d{2}\/\d{4})/i);
+    if(perM){
+      periodoStr=perM[0];
+      const [,d1,m1,y1]=perM[1].match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      const [,d2,m2,y2]=perM[2].match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      ano=parseInt(y1);
+      mes = (m1!==m2) ? 0 : parseInt(m1); // 0 = período não-mensal (ex.: trimestre)
+    }
+  }
+  if(!filialNome) throw new Error('Filial não identificada no PDF. Verifique se o campo "Filial:" está presente no relatório.');
+  if(!ano){ ano=new Date().getFullYear(); mes=new Date().getMonth()+1; }
+
+  // ── Localizar linha de cabeçalho da tabela e detectar ORDEM REAL das colunas ──
+  // IMPORTANTE: a ordem das colunas varia entre exportações (ex.: Compras pode vir
+  // antes ou depois de Balcão/Atacado/Oficina). Não assumir posição fixa — ler do cabeçalho.
+  const COLS_ESPERADAS = ['vendas','pct','markup','balcao','atacado','oficina','compras'];
+  let colOrder = null; // array na ordem em que aparecem no PDF, ex.: ['vendas','pct','markup','compras','balcao','atacado','oficina']
+
+  const grupos = [];
+  let inTable = false;
+
+  for(let i=0;i<lines.length;i++){
+    const line = lines[i];
+
+    // Detectar linha de cabeçalho da tabela e extrair ordem das colunas
+    if(/^Grupo\b/.test(line) && /Vendas/i.test(line) && /MarkUp/i.test(line)){
+      inTable = true;
+      // Tokenizar o cabeçalho (por tab ou múltiplos espaços) para descobrir a ordem
+      let headTokens = line.split(/\t+/).map(s=>s.trim()).filter(Boolean);
+      if(headTokens.length < 4) headTokens = line.split(/\s{2,}/).map(s=>s.trim()).filter(Boolean);
+      if(headTokens.length < 4) headTokens = line.split(/\s+/).map(s=>s.trim()).filter(Boolean);
+
+      const MAP_TOKEN = {
+        'vendas':'vendas', '%':'pct', 'markup':'markup',
+        'balcão':'balcao', 'balcao':'balcao',
+        'atacado':'atacado',
+        'oficina':'oficina',
+        'compras':'compras',
+      };
+      colOrder = headTokens
+        .map(t => MAP_TOKEN[t.toLowerCase()])
+        .filter(Boolean);
+
+      // Validação: precisa ter encontrado todas as 7 colunas esperadas
+      const faltando = COLS_ESPERADAS.filter(c=>!colOrder.includes(c));
+      if(colOrder.length !== 7 || faltando.length){
+        console.warn('⚠️ Grupo Interno: cabeçalho não reconhecido completamente, usando ordem padrão. Tokens:', headTokens, 'Ordem detectada:', colOrder, 'Faltando:', faltando);
+        colOrder = COLS_ESPERADAS.slice(); // fallback para ordem padrão original
+      }
+      continue;
+    }
+    if(!inTable) continue;
+
+    // Parar ao encontrar "Totais dos Grupos" ou "Operações Consideradas"
+    if(/^Totais dos Grupos/i.test(line) || /^Operações Consideradas/i.test(line)){
+      inTable = false;
+      continue;
+    }
+    if(!inTable) continue;
+
+    // Extrair todos os números no formato BR da linha
+    const allNums = line.match(/-?[\d]{1,3}(?:\.[\d]{3})*,[\d]{1,2}/g) || [];
+    if(allNums.length < 6) continue; // linha não tem dados suficientes (provavelmente lixo)
+
+    // Nome do grupo = texto antes do primeiro número
+    const firstNumIdx = line.indexOf(allNums[0]);
+    const grupoNome = line.slice(0, firstNumIdx).trim().replace(/\t/g,' ').replace(/\s+/g,' ');
+    if(!grupoNome) continue;
+
+    // Pegar os últimos 7 números e mapear pela ORDEM DETECTADA no cabeçalho
+    const numsRaw = allNums.slice(-7).map(pNumGI);
+    if(numsRaw.length < 7) continue;
+
+    const valores = {};
+    (colOrder||COLS_ESPERADAS).forEach((col, idx) => { valores[col] = numsRaw[idx]; });
+
+    grupos.push({
+      grupo: grupoNome,
+      vendas: valores.vendas||0, pct: valores.pct||0, markup: valores.markup||0,
+      balcao: valores.balcao||0, atacado: valores.atacado||0,
+      oficina: valores.oficina||0, compras: valores.compras||0,
+    });
+  }
+
+  if(!grupos.length) throw new Error('Nenhum grupo encontrado no PDF. Verifique se o relatório é "Vendas de Peças por Grupo Interno".');
+
+  // ── Converter para formato interno: 2 linhas por grupo (canal) ──
+  const out = [];
+  grupos.forEach(g=>{
+    const fatTelepecas = g.balcao + g.atacado;
+    const fatOficina = g.oficina;
+
+    if(fatTelepecas !== 0){
+      out.push({
+        Env:env, Filial:filialNome, Ano:ano, Mês_Num:mes,
+        Canal:'Telepeças/Balcão', Departamento:'Balcão/Atacado',
+        Vendedor:'—', Cliente:'—', CnpjCpf:'', Cidade:'',
+        Segmento:g.grupo, Tipo_OS:'—', Nr_OS:'',
+        Fat_Real:fatTelepecas, Fat_Plan:0,
+        RB_Real:0, RB_Plan:0,
+        Bon_Real:0, Bon_Plan:0,
+        LB_Real_R:0, LB_Real_Pct:g.markup, // MarkUp do relatório — não é margem, mas é a métrica disponível
+        LB_Plan_Pct:0,
+        RD_Real_Pct:0, RD_Plan_Pct:0,
+        Custo:0, Qtde:0, CodProduto:'',
+        Fat_Bruto:fatTelepecas,
+        Qtd_OS:0,
+        _fonte:'grupo_interno',
+      });
+    }
+    if(fatOficina !== 0){
+      out.push({
+        Env:env, Filial:filialNome, Ano:ano, Mês_Num:mes,
+        Canal:'Oficina/Funilaria', Departamento:'Oficina',
+        Vendedor:'—', Cliente:'—', CnpjCpf:'', Cidade:'',
+        Segmento:g.grupo, Tipo_OS:'—', Nr_OS:'',
+        Fat_Real:fatOficina, Fat_Plan:0,
+        RB_Real:0, RB_Plan:0,
+        Bon_Real:0, Bon_Plan:0,
+        LB_Real_R:0, LB_Real_Pct:g.markup,
+        LB_Plan_Pct:0,
+        RD_Real_Pct:0, RD_Plan_Pct:0,
+        Custo:0, Qtde:0, CodProduto:'',
+        Fat_Bruto:fatOficina,
+        Qtd_OS:0,
+        _fonte:'grupo_interno',
+      });
+    }
+  });
+
+  return {
+    rows: out,
+    meta: {
+      filialNome, periodoStr, mes, ano,
+      totalGrupos: grupos.length,
+      totalVendas: grupos.reduce((s,g)=>s+g.vendas,0),
+      totalCompras: grupos.reduce((s,g)=>s+g.compras,0),
+    }
+  };
+}
+
 /* ── Parser DRE Gerencial (De_Nigris_*.xlsx) ──────────────────────────────
    Estrutura: linhas = indicadores, colunas = meses (serial Excel)
    Bloco 2026: colunas 1,3,5...23 (índices pares começando em 1)
@@ -8388,7 +8612,69 @@ function pFile(file){
     const rdPdf=new FileReader();
     rdPdf.onload=async ev=>{
       try{
-        const {rows:osRows, meta} = await parseFatOfPDF(ev.target.result, upEnv);
+        // ── Detectar tipo de PDF: Grupo Interno (vendas) vs FAT_OF (tipo de OS) ──
+        const arrBuf = ev.target.result;
+        const tipoDetectado = await detectarTipoPDF(arrBuf);
+
+        if(tipoDetectado === 'grupo_interno'){
+          // ═══ NOVO PARSER: Grupo Interno (substitui DMS) ═══════════
+          const {rows: giRows, meta} = await parseGrupoInternoPDF(arrBuf, upEnv);
+          pr.style.display='none';
+          if(!giRows.length) throw new Error('Nenhum grupo encontrado no PDF. Verifique se é o relatório "Vendas de Peças por Grupo Interno".');
+          const filialSel = getUpFilial();
+          const filial = (filialSel&&filialSel!=='auto') ? filialSel : meta.filialNome;
+          giRows.forEach(r=>r.Filial=filial);
+          const mes=meta.mes, ano=meta.ano;
+          const modeEl=document.getElementById('up-modo');
+          const modo=modeEl?modeEl.value:'substituir';
+          if(modo==='substituir'){
+            // Remove dados anteriores do mesmo mês/filial — tanto grupo_interno quanto dms legado
+            DB[upEnv]=DB[upEnv].filter(r=>!(r.Filial===filial&&r.Mês_Num===mes&&r.Ano===ano&&(r._fonte==='grupo_interno'||r._fonte==='dms')));
+          }
+          DB[upEnv].push(...giRows);
+          if(!ANOS_LIST.includes(ano)) ANOS_LIST.push(ano);
+          ANOS_LIST.sort((a,b)=>a-b);
+          renderStatusStrip(upEnv);
+          saveState();
+          initAnoChips(upEnv); initFilialChips(upEnv);
+          renderAll(upEnv);
+
+          // ═══ ENVIO AUTOMÁTICO PARA GOOGLE SHEETS ══════════════════
+          window._sheetsFilaDone = false;
+          if (SHEETS_CONFIG && SHEETS_CONFIG.enabled && giRows.length > 0) {
+            const acaoSheets = modo==='substituir' ? 'replace' : 'append';
+            const filtrosSheets = modo==='substituir' ? {filiais:[filial], anos:[ano], meses:[mes]} : null;
+            _sheetsAppend('vendas', upEnv, giRows, acaoSheets, filtrosSheets)
+              .then(() => {
+                mostrarToastSync('✅ Grupo Interno sincronizado com Google Sheets', 'success');
+                window._sheetsFilaDone = true;
+              })
+              .catch(err => {
+                console.warn('⚠️ Erro ao sincronizar Grupo Interno com Sheets:', err);
+                window._sheetsFilaDone = true;
+              });
+          } else {
+            window._sheetsFilaDone = true;
+          }
+          // ══════════════════════════════════════════════════════════
+
+          st.textContent=`✅ ${meta.totalGrupos} grupos · ${filial} · ${meta.periodoStr}`;
+          st.style.color='var(--grn)';
+          const pv=document.getElementById('up-preview');
+          if(pv) pv.innerHTML=`<div style="margin-top:9px;background:var(--card2);border:1px solid var(--brd);border-radius:7px;padding:9px 12px;font-size:11px;line-height:1.8">
+            <div style="font-weight:700;color:var(--grn);margin-bottom:3px">✅ Grupo Interno importado</div>
+            <div><span style="color:var(--txt3)">Filial:</span> <strong>${meta.filialNome}</strong></div>
+            <div><span style="color:var(--txt3)">Período:</span> <strong>${meta.periodoStr}</strong></div>
+            <div><span style="color:var(--txt3)">Grupos:</span> <strong>${meta.totalGrupos}</strong></div>
+            <div><span style="color:var(--txt3)">Vendas Totais:</span> <strong>${fRFull(meta.totalVendas)}</strong></div>
+            <div><span style="color:var(--txt3)">Compras Totais:</span> <strong>${fRFull(meta.totalCompras)}</strong></div>
+          </div>`;
+          setTimeout(closeUp, 2200);
+          return;
+        }
+
+        // ═══ PARSER LEGADO: FAT_OF (Por Tipo de OS) ═══════════════════
+        const {rows:osRows, meta} = await parseFatOfPDF(arrBuf, upEnv);
         pr.style.display='none';
         if(!osRows.length) throw new Error('Nenhum dado de Peças encontrado no PDF. Verifique se é o "Resumo de Faturamento" (FAT_OF).');
         const filialSel = getUpFilial();
