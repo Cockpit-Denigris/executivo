@@ -1850,8 +1850,8 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
       <div class="upz" id="upzone" onclick="document.getElementById('fIn').click()" ondragover="dOv(event)" ondrop="dDr(event)" ondragleave="dLv()">
         <div class="upz-ico">📂</div>
         <div class="upz-txt">Arraste ou clique para selecionar</div>
-        <div class="upz-sub">Aceito: <strong>.xlsx · .xls · .csv · .pdf</strong> · Múltiplos arquivos permitidos</div>
-        <input type="file" id="fIn" accept=".xlsx,.xls,.csv,.pdf" style="display:none" multiple onchange="hdlFile(event)">
+        <div class="upz-sub">Aceito: <strong>.xlsx · .xls · .csv · .pdf · .txt</strong> · Múltiplos arquivos permitidos</div>
+        <input type="file" id="fIn" accept=".xlsx,.xls,.csv,.pdf,.txt" style="display:none" multiple onchange="hdlFile(event)">
       </div>
       <div class="upprg" id="upprg"><div class="upprg-fill"></div></div>
       <div class="upst" id="upst"></div>
@@ -1860,7 +1860,7 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
         <strong style="color:var(--txt2);font-size:11px">📋 Formatos suportados (auto-detectados)</strong><br>
         <span style="color:var(--acc)">📊 Orçamento/Metas</span> <span style="color:var(--txt3)">v2_Orçamento_*.xlsx → importa metas mensais por canal</span><br>
         <span style="color:var(--grn)">📈 DRE Gerencial</span> <span style="color:var(--txt3)">De_Nigris_*.xlsx → KPIs mensais (RB, Fat.Liq, LB, RD)</span><br>
-        <span style="color:var(--blu)">📋 DMS Transacional</span> <span style="color:var(--txt3)">VendaPecaAcesPneu_*.xls → vendedores, segmentos, OS</span><br>
+        <span style="color:var(--blu)">📦 Grupo Interno</span> <span style="color:var(--txt3)">.txt ou .pdf → Vendas de Peças por Grupo Interno (Balcão/Atacado/Oficina)</span><br>
         <span style="color:var(--pur)">🔧 Por Tipo de OS</span> <span style="color:var(--txt3)">FAT_OF*.pdf → Resumo de Faturamento · seção Peças</span>
       </div>
     </div>
@@ -7412,6 +7412,19 @@ async function detectarTipoPDF(arrayBuffer){
   return 'fat_of';
 }
 
+/* ── Parser Grupo Interno TXT (alternativa mais confiável ao PDF) ──────────
+   O sistema interno da Mercedes permite exportar o mesmo relatório em .txt,
+   com texto puro e colunas alinhadas por espaçamento fixo — sem a fragilidade
+   de posicionamento (coordenadas X/Y) que o PDF.js tem. Reaproveita 100% da
+   lógica de parseGrupoInternoText() já validada para PDF.
+   IMPORTANTE: o arquivo vem em encoding ISO-8859-1 (Latin-1), não UTF-8 —
+   precisa ser lido com FileReader.readAsText(file, 'ISO-8859-1') para os
+   acentos saírem corretos.
+───────────────────────────────────────────────────────────────────────── */
+function parseGrupoInternoTXT(text, env){
+  return parseGrupoInternoText(text, env);
+}
+
 async function parseGrupoInternoPDF(arrayBuffer, env){
   if(typeof pdfjsLib === 'undefined') throw new Error('PDF.js não carregado. Verifique conexão com internet.');
   pdfjsLib.GlobalWorkerOptions.workerSrc = '';
@@ -7426,15 +7439,30 @@ async function parseGrupoInternoPDF(arrayBuffer, env){
   for(let p=1; p<=pdf.numPages; p++){
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    const byY = {};
-    content.items.forEach(item=>{
-      const y = Math.round(item.transform[5]);
-      if(!byY[y]) byY[y]=[];
-      byY[y].push({x: item.transform[4], str: item.str});
+
+    // ── Agrupar por Y com TOLERÂNCIA (não exigir Y idêntico) ──
+    // Em alguns PDFs, o texto da coluna "Grupo" e os números das colunas
+    // seguintes podem ter um Y levemente diferente (poucos pontos de diferença),
+    // o que faz o agrupamento por Y exato separar erroneamente o que deveria
+    // ser uma única linha. Tolerância de 3pt resolve sem juntar linhas distintas.
+    const Y_TOLERANCE = 3;
+    const items = content.items
+      .map(item=>({y: item.transform[5], x: item.transform[4], str: item.str}))
+      .filter(it=>it.str && it.str.trim());
+    items.sort((a,b)=>b.y-a.y); // topo → base
+
+    const grouped = []; // [{y, items:[{x,str}]}]
+    items.forEach(it=>{
+      let bucket = grouped.find(g=>Math.abs(g.y-it.y)<=Y_TOLERANCE);
+      if(!bucket){
+        bucket = {y: it.y, items: []};
+        grouped.push(bucket);
+      }
+      bucket.items.push({x: it.x, str: it.str});
     });
-    const ys = Object.keys(byY).map(Number).sort((a,b)=>b-a);
-    ys.forEach(y=>{
-      const lineItems = byY[y].sort((a,b)=>a.x-b.x);
+
+    grouped.forEach(g=>{
+      const lineItems = g.items.sort((a,b)=>a.x-b.x);
       fullText += lineItems.map(i=>i.str).join('\t') + '\n';
     });
     fullText += '\n--- PAGE BREAK ---\n';
@@ -8623,10 +8651,85 @@ function extractFilialFromDRE(wb, sheetName){
   return mapFilial(title) || 'Itapeva';
 }
 
+// Processa o resultado do parser de Grupo Interno (vindo de PDF ou TXT) —
+// lógica compartilhada para evitar duplicação entre os dois formatos de entrada.
+function _processarGrupoInternoResult(giRows, meta, st, pr){
+  pr.style.display='none';
+  if(!giRows.length) throw new Error('Nenhum grupo encontrado no arquivo. Verifique se é o relatório "Vendas de Peças por Grupo Interno".');
+  const filialSel = getUpFilial();
+  const filial = (filialSel&&filialSel!=='auto') ? filialSel : meta.filialNome;
+  giRows.forEach(r=>r.Filial=filial);
+  const mes=meta.mes, ano=meta.ano;
+  const modeEl=document.getElementById('up-modo');
+  const modo=modeEl?modeEl.value:'substituir';
+  if(modo==='substituir'){
+    // Remove dados anteriores do mesmo mês/filial — tanto grupo_interno quanto dms legado
+    DB[upEnv]=DB[upEnv].filter(r=>!(r.Filial===filial&&r.Mês_Num===mes&&r.Ano===ano&&(r._fonte==='grupo_interno'||r._fonte==='dms')));
+  }
+  DB[upEnv].push(...giRows);
+  if(!ANOS_LIST.includes(ano)) ANOS_LIST.push(ano);
+  ANOS_LIST.sort((a,b)=>a-b);
+  syncSegmentos(DB[upEnv]);
+  renderStatusStrip(upEnv);
+  saveState();
+  initAnoChips(upEnv); initFilialChips(upEnv);
+  renderAll(upEnv);
+
+  // ═══ ENVIO AUTOMÁTICO PARA GOOGLE SHEETS ══════════════════
+  window._sheetsFilaDone = false;
+  if (SHEETS_CONFIG && SHEETS_CONFIG.enabled && giRows.length > 0) {
+    const acaoSheets = modo==='substituir' ? 'replace' : 'append';
+    const filtrosSheets = modo==='substituir' ? {filiais:[filial], anos:[ano], meses:[mes]} : null;
+    _sheetsAppend('vendas', upEnv, giRows, acaoSheets, filtrosSheets)
+      .then(() => {
+        mostrarToastSync('✅ Grupo Interno sincronizado com Google Sheets', 'success');
+        window._sheetsFilaDone = true;
+      })
+      .catch(err => {
+        console.warn('⚠️ Erro ao sincronizar Grupo Interno com Sheets:', err);
+        window._sheetsFilaDone = true;
+      });
+  } else {
+    window._sheetsFilaDone = true;
+  }
+  // ══════════════════════════════════════════════════════════
+
+  st.textContent=`✅ ${meta.totalGrupos} grupos · ${filial} · ${meta.periodoStr}`;
+  st.style.color='var(--grn)';
+  const pv=document.getElementById('up-preview');
+  if(pv) pv.innerHTML=`<div style="margin-top:9px;background:var(--card2);border:1px solid var(--brd);border-radius:7px;padding:9px 12px;font-size:11px;line-height:1.8">
+    <div style="font-weight:700;color:var(--grn);margin-bottom:3px">✅ Grupo Interno importado</div>
+    <div><span style="color:var(--txt3)">Filial:</span> <strong>${meta.filialNome}</strong></div>
+    <div><span style="color:var(--txt3)">Período:</span> <strong>${meta.periodoStr}</strong></div>
+    <div><span style="color:var(--txt3)">Grupos:</span> <strong>${meta.totalGrupos}</strong></div>
+    <div><span style="color:var(--txt3)">Vendas Totais:</span> <strong>${fRFull(meta.totalVendas)}</strong></div>
+    <div><span style="color:var(--txt3)">Compras Totais:</span> <strong>${fRFull(meta.totalCompras)}</strong></div>
+  </div>`;
+  setTimeout(closeUp, 2200);
+}
+
 function pFile(file){
   if(!file)return;
   const st=document.getElementById('upst'), pr=document.getElementById('upprg');
   st.textContent=`Lendo: ${file.name}…`; st.style.color=''; pr.style.display='block';
+
+  // ── TXT: Grupo Interno (formato preferencial — mais confiável que PDF) ──
+  // Encoding ISO-8859-1 (Latin-1), conforme exportado nativamente pelo sistema interno
+  if(file.name.toLowerCase().endsWith('.txt')){
+    const rdTxt=new FileReader();
+    rdTxt.onload=async ev=>{
+      try{
+        const text = ev.target.result;
+        const {rows: giRows, meta} = parseGrupoInternoTXT(text, upEnv);
+        _processarGrupoInternoResult(giRows, meta, st, pr);
+      }catch(err){
+        pr.style.display='none';
+        st.textContent='❌ '+err.message; st.style.color='var(--red)';
+      }
+    };
+    rdTxt.readAsText(file, 'ISO-8859-1');
+    return;
+  }
 
   // PDF files need ArrayBuffer, not binary string
   if(file.name.toLowerCase().endsWith('.pdf')){
@@ -8640,58 +8743,7 @@ function pFile(file){
         if(tipoDetectado === 'grupo_interno'){
           // ═══ NOVO PARSER: Grupo Interno (substitui DMS) ═══════════
           const {rows: giRows, meta} = await parseGrupoInternoPDF(arrBuf, upEnv);
-          pr.style.display='none';
-          if(!giRows.length) throw new Error('Nenhum grupo encontrado no PDF. Verifique se é o relatório "Vendas de Peças por Grupo Interno".');
-          const filialSel = getUpFilial();
-          const filial = (filialSel&&filialSel!=='auto') ? filialSel : meta.filialNome;
-          giRows.forEach(r=>r.Filial=filial);
-          const mes=meta.mes, ano=meta.ano;
-          const modeEl=document.getElementById('up-modo');
-          const modo=modeEl?modeEl.value:'substituir';
-          if(modo==='substituir'){
-            // Remove dados anteriores do mesmo mês/filial — tanto grupo_interno quanto dms legado
-            DB[upEnv]=DB[upEnv].filter(r=>!(r.Filial===filial&&r.Mês_Num===mes&&r.Ano===ano&&(r._fonte==='grupo_interno'||r._fonte==='dms')));
-          }
-          DB[upEnv].push(...giRows);
-          if(!ANOS_LIST.includes(ano)) ANOS_LIST.push(ano);
-          ANOS_LIST.sort((a,b)=>a-b);
-          syncSegmentos(DB[upEnv]);
-          renderStatusStrip(upEnv);
-          saveState();
-          initAnoChips(upEnv); initFilialChips(upEnv);
-          renderAll(upEnv);
-
-          // ═══ ENVIO AUTOMÁTICO PARA GOOGLE SHEETS ══════════════════
-          window._sheetsFilaDone = false;
-          if (SHEETS_CONFIG && SHEETS_CONFIG.enabled && giRows.length > 0) {
-            const acaoSheets = modo==='substituir' ? 'replace' : 'append';
-            const filtrosSheets = modo==='substituir' ? {filiais:[filial], anos:[ano], meses:[mes]} : null;
-            _sheetsAppend('vendas', upEnv, giRows, acaoSheets, filtrosSheets)
-              .then(() => {
-                mostrarToastSync('✅ Grupo Interno sincronizado com Google Sheets', 'success');
-                window._sheetsFilaDone = true;
-              })
-              .catch(err => {
-                console.warn('⚠️ Erro ao sincronizar Grupo Interno com Sheets:', err);
-                window._sheetsFilaDone = true;
-              });
-          } else {
-            window._sheetsFilaDone = true;
-          }
-          // ══════════════════════════════════════════════════════════
-
-          st.textContent=`✅ ${meta.totalGrupos} grupos · ${filial} · ${meta.periodoStr}`;
-          st.style.color='var(--grn)';
-          const pv=document.getElementById('up-preview');
-          if(pv) pv.innerHTML=`<div style="margin-top:9px;background:var(--card2);border:1px solid var(--brd);border-radius:7px;padding:9px 12px;font-size:11px;line-height:1.8">
-            <div style="font-weight:700;color:var(--grn);margin-bottom:3px">✅ Grupo Interno importado</div>
-            <div><span style="color:var(--txt3)">Filial:</span> <strong>${meta.filialNome}</strong></div>
-            <div><span style="color:var(--txt3)">Período:</span> <strong>${meta.periodoStr}</strong></div>
-            <div><span style="color:var(--txt3)">Grupos:</span> <strong>${meta.totalGrupos}</strong></div>
-            <div><span style="color:var(--txt3)">Vendas Totais:</span> <strong>${fRFull(meta.totalVendas)}</strong></div>
-            <div><span style="color:var(--txt3)">Compras Totais:</span> <strong>${fRFull(meta.totalCompras)}</strong></div>
-          </div>`;
-          setTimeout(closeUp, 2200);
+          _processarGrupoInternoResult(giRows, meta, st, pr);
           return;
         }
 
