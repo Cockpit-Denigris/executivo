@@ -1803,22 +1803,11 @@ table.meta-tbl th{background:var(--card2);font-size:10px;color:var(--txt3);text-
       <!-- Seletor de filial -->
       <div style="margin-bottom:8px;background:var(--card2);border:1px solid var(--brd);border-radius:8px;padding:9px 12px;">
         <div style="font-size:10px;color:var(--txt3);margin-bottom:6px;font-weight:600;letter-spacing:.04em">FILIAL DO ARQUIVO</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <div id="up-filial-options" style="display:flex;gap:6px;flex-wrap:wrap;">
           <label id="ufl-auto" style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid var(--acc);background:var(--acc)22;color:var(--acc);font-weight:600;">
             <input type="radio" name="upFilial" value="auto" checked style="display:none"> 🔍 Auto-detectar
           </label>
-          <label id="ufl-itapeva" style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid var(--brd);color:var(--txt2);">
-            <input type="radio" name="upFilial" value="Itapeva" style="display:none"> Itapeva
-          </label>
-          <label id="ufl-sorocaba" style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid var(--brd);color:var(--txt2);">
-            <input type="radio" name="upFilial" value="Sorocaba" style="display:none"> Sorocaba
-          </label>
-          <label id="ufl-itu" style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid var(--brd);color:var(--txt2);">
-            <input type="radio" name="upFilial" value="Itu" style="display:none"> Itu
-          </label>
-          <label id="ufl-aluminio" style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid var(--brd);color:var(--txt2);">
-            <input type="radio" name="upFilial" value="Alumínio" style="display:none"> Alumínio
-          </label>
+          <!-- Filiais adicionadas dinamicamente via populateUpFilialOptions() -->
         </div>
       </div>
 
@@ -6871,6 +6860,8 @@ function openUp(env){
   // Atualizar contador de cidades ao abrir o modal
   const cidEl=document.getElementById('cid-count');
   if(cidEl) cidEl.textContent=Object.keys(CIDADE_MAP).length+' cidades';
+  // Popular filiais dinamicamente a partir dos dados já carregados (sem hardcode)
+  populateUpFilialOptions(upEnv);
   // Reset filial selector to auto
   setUpFilial('auto');
   // Reset modo to acumular
@@ -6880,6 +6871,25 @@ function openUp(env){
   document.getElementById('upst').style.color='';
   document.getElementById('up-preview').innerHTML='';
   document.getElementById('upov').classList.add('open');
+}
+
+// Popula as opções de filial no seletor de upload dinamicamente,
+// usando as filiais já presentes nos dados (DB[env]) — sem lista fixa no código.
+function populateUpFilialOptions(env){
+  const wrap = document.getElementById('up-filial-options');
+  if(!wrap) return;
+  // Remove opções antigas (mantém só o "Auto-detectar")
+  wrap.querySelectorAll('label:not(#ufl-auto)').forEach(l=>l.remove());
+  const filiais = [...new Set((DB[env]||[]).map(r=>r.Filial).filter(f=>f&&f!=='—'))].sort();
+  filiais.forEach(f=>{
+    const id = 'ufl-'+f.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'');
+    const lbl = document.createElement('label');
+    lbl.id = id;
+    lbl.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid var(--brd);color:var(--txt2);';
+    lbl.innerHTML = `<input type="radio" name="upFilial" value="${f}" style="display:none"> ${f}`;
+    lbl.addEventListener('click', ()=>setUpFilial(f));
+    wrap.appendChild(lbl);
+  });
 }
 
 function setUpFilial(val){
@@ -7462,11 +7472,20 @@ function parseGrupoInternoText(text, env){
   if(!filialNome) throw new Error('Filial não identificada no PDF. Verifique se o campo "Filial:" está presente no relatório.');
   if(!ano){ ano=new Date().getFullYear(); mes=new Date().getMonth()+1; }
 
-  // ── Localizar linha de cabeçalho da tabela e detectar ORDEM REAL das colunas ──
-  // IMPORTANTE: a ordem das colunas varia entre exportações (ex.: Compras pode vir
-  // antes ou depois de Balcão/Atacado/Oficina). Não assumir posição fixa — ler do cabeçalho.
-  const COLS_ESPERADAS = ['vendas','pct','markup','balcao','atacado','oficina','compras'];
-  let colOrder = null; // array na ordem em que aparecem no PDF, ex.: ['vendas','pct','markup','compras','balcao','atacado','oficina']
+  // ── Localizar linha de cabeçalho da tabela e detectar ORDEM + QUANTIDADE REAL das colunas ──
+  // IMPORTANTE: tanto a ORDEM quanto a QUANTIDADE de colunas variam entre exportações
+  // (ex.: relatórios mais recentes incluem uma coluna "Devolvido" que antes não existia).
+  // Não assumir número fixo de colunas — ler do cabeçalho dinamicamente.
+  const COLS_OBRIGATORIAS = ['vendas','pct','markup','balcao','atacado','oficina','compras'];
+  const MAP_TOKEN = {
+    'vendas':'vendas', '%':'pct', 'markup':'markup',
+    'balcão':'balcao', 'balcao':'balcao',
+    'atacado':'atacado',
+    'oficina':'oficina',
+    'compras':'compras',
+    'devolvido':'devolvido', 'devolução':'devolvido', 'devolucao':'devolvido',
+  };
+  let colOrder = null; // array na ordem real em que aparecem no PDF (tamanho variável)
 
   const grupos = [];
   let inTable = false;
@@ -7474,7 +7493,7 @@ function parseGrupoInternoText(text, env){
   for(let i=0;i<lines.length;i++){
     const line = lines[i];
 
-    // Detectar linha de cabeçalho da tabela e extrair ordem das colunas
+    // Detectar linha de cabeçalho da tabela e extrair ordem + quantidade das colunas
     if(/^Grupo\b/.test(line) && /Vendas/i.test(line) && /MarkUp/i.test(line)){
       inTable = true;
       // Tokenizar o cabeçalho (por tab ou múltiplos espaços) para descobrir a ordem
@@ -7482,22 +7501,17 @@ function parseGrupoInternoText(text, env){
       if(headTokens.length < 4) headTokens = line.split(/\s{2,}/).map(s=>s.trim()).filter(Boolean);
       if(headTokens.length < 4) headTokens = line.split(/\s+/).map(s=>s.trim()).filter(Boolean);
 
-      const MAP_TOKEN = {
-        'vendas':'vendas', '%':'pct', 'markup':'markup',
-        'balcão':'balcao', 'balcao':'balcao',
-        'atacado':'atacado',
-        'oficina':'oficina',
-        'compras':'compras',
-      };
       colOrder = headTokens
         .map(t => MAP_TOKEN[t.toLowerCase()])
         .filter(Boolean);
 
-      // Validação: precisa ter encontrado todas as 7 colunas esperadas
-      const faltando = COLS_ESPERADAS.filter(c=>!colOrder.includes(c));
-      if(colOrder.length !== 7 || faltando.length){
-        console.warn('⚠️ Grupo Interno: cabeçalho não reconhecido completamente, usando ordem padrão. Tokens:', headTokens, 'Ordem detectada:', colOrder, 'Faltando:', faltando);
-        colOrder = COLS_ESPERADAS.slice(); // fallback para ordem padrão original
+      // Validação: precisa ter encontrado pelo menos as 7 colunas obrigatórias
+      const faltando = COLS_OBRIGATORIAS.filter(c=>!colOrder.includes(c));
+      if(faltando.length){
+        console.warn('⚠️ Grupo Interno: colunas obrigatórias faltando no cabeçalho, usando ordem padrão. Tokens:', headTokens, 'Detectado:', colOrder, 'Faltando:', faltando);
+        colOrder = COLS_OBRIGATORIAS.slice(); // fallback para ordem/quantidade padrão (7 colunas)
+      } else {
+        console.log('✅ Grupo Interno: colunas detectadas no cabeçalho:', colOrder, `(${colOrder.length} colunas)`);
       }
       continue;
     }
@@ -7512,16 +7526,18 @@ function parseGrupoInternoText(text, env){
 
     // Extrair todos os números no formato BR da linha
     const allNums = line.match(/-?[\d]{1,3}(?:\.[\d]{3})*,[\d]{1,2}/g) || [];
-    if(allNums.length < 6) continue; // linha não tem dados suficientes (provavelmente lixo)
+    const nCols = (colOrder||COLS_OBRIGATORIAS).length;
+    if(allNums.length < nCols) continue; // linha não tem dados suficientes (provavelmente lixo)
 
     // Nome do grupo = texto antes do primeiro número
     const firstNumIdx = line.indexOf(allNums[0]);
     const grupoNome = line.slice(0, firstNumIdx).trim().replace(/\t/g,' ').replace(/\s+/g,' ');
     if(!grupoNome) continue;
 
-    // Pegar os últimos 7 números e mapear pela ORDEM DETECTADA no cabeçalho
-    const numsRaw = allNums.slice(-7).map(pNumGI);
-    if(numsRaw.length < 7) continue;
+    // Pegar exatamente N últimos números (N = quantidade de colunas detectadas no cabeçalho)
+    // e mapear pela ORDEM DETECTADA — evita deslocamento quando há colunas extras (ex.: Devolvido)
+    const numsRaw = allNums.slice(-nCols).map(pNumGI);
+    if(numsRaw.length < nCols) continue;
 
     const valores = {};
     (colOrder||COLS_ESPERADAS).forEach((col, idx) => { valores[col] = numsRaw[idx]; });
@@ -8634,6 +8650,7 @@ function pFile(file){
           DB[upEnv].push(...giRows);
           if(!ANOS_LIST.includes(ano)) ANOS_LIST.push(ano);
           ANOS_LIST.sort((a,b)=>a-b);
+          syncSegmentos(DB[upEnv]);
           renderStatusStrip(upEnv);
           saveState();
           initAnoChips(upEnv); initFilialChips(upEnv);
