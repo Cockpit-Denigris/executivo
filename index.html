@@ -3892,7 +3892,9 @@ function initFilialChips(env){
   // Chips por filial — todos clicáveis, restrição é só de quais filiais aparecem
   filsNoDado.forEach(f => {
     const c = document.createElement('div');
-    c.className = 'chip' + (selAtual.has(f)||selAtual.has('all') ? ' on-'+env : '');
+    // Marca individual só quando a filial está EXPLICITAMENTE selecionada —
+    // se 'all' está ativo, só o chip "Todas" fica destacado (não os individuais)
+    c.className = 'chip' + (selAtual.has(f) ? ' on-'+env : '');
     c.textContent = f;
     // ✅ FIX: consult pode filtrar dentro das filiais do seu núcleo
     c.onclick = () => fTogFilial(env, c, f);
