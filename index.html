@@ -7068,7 +7068,57 @@ function _getCol(r, ...names){
   return '';
 }
 
+// Reidrata uma linha de Grupo Interno lida do CSV do Sheets (tudo vem como string)
+// de volta para os tipos corretos, usando as colunas reais gravadas pelo parser
+// (Ano, Mês_Num, Filial, Canal, Segmento, Fat_Real, etc — ver _processarGrupoInternoResult).
+function _parseGrupoInternoRow(r, env){
+  const ano = parseInt(_getCol(r,'Ano')) || 0;
+  const mes = parseInt(_getCol(r,'Mês_Num','Mes_Num','Mes')) || 0;
+  if(!ano || !mes) return null;
+
+  const filialRaw = _getCol(r,'Filial');
+  const filial = mapFilial(String(filialRaw).trim()) || String(filialRaw).trim();
+  if(!filial) return null;
+
+  const _pBR = v => parseFloat(String(v||0).replace(/\./g,'').replace(',','.')) || 0;
+  const canal = _getCol(r,'Canal') || '';
+
+  return {
+    Filial: filial, Ano: ano, Mês_Num: mes,
+    Canal: canal, Departamento: _getCol(r,'Departamento') || '',
+    Vendedor: _getCol(r,'Vendedor') || '—',
+    Cliente: _getCol(r,'Cliente') || '—',
+    CnpjCpf: _getCol(r,'CnpjCpf') || '',
+    Cidade: _getCol(r,'Cidade') || '',
+    Segmento: _getCol(r,'Segmento') || '',
+    Tipo_OS: _getCol(r,'Tipo_OS') || '—',
+    Nr_OS: _getCol(r,'Nr_OS') || '',
+    Fat_Real: _pBR(_getCol(r,'Fat_Real')), Fat_Plan: _pBR(_getCol(r,'Fat_Plan')),
+    RB_Real: _pBR(_getCol(r,'RB_Real')), RB_Plan: _pBR(_getCol(r,'RB_Plan')),
+    Bon_Real: _pBR(_getCol(r,'Bon_Real')), Bon_Plan: _pBR(_getCol(r,'Bon_Plan')),
+    LB_Real_R: _pBR(_getCol(r,'LB_Real_R')), LB_Real_Pct: _pBR(_getCol(r,'LB_Real_Pct')),
+    LB_Plan_Pct: _pBR(_getCol(r,'LB_Plan_Pct')),
+    RD_Real_Pct: _pBR(_getCol(r,'RD_Real_Pct')), RD_Plan_Pct: _pBR(_getCol(r,'RD_Plan_Pct')),
+    Custo: _pBR(_getCol(r,'Custo')), Qtde: _pBR(_getCol(r,'Qtde')),
+    CodProduto: _getCol(r,'CodProduto') || '',
+    Fat_Bruto: _pBR(_getCol(r,'Fat_Bruto')),
+    Qtd_OS: _pBR(_getCol(r,'Qtd_OS')),
+    _fonte: 'grupo_interno',
+    Env: env
+  };
+}
+
 function _parseDMSRow(r, env) {
+  // ── Linhas do Grupo Interno (novo formato) já vêm com schema próprio ──
+  // Não passam pela lógica legada do DMS (que busca colunas como
+  // 'Mes'/'Ano'/'Emissao'/'Vlr_Liquido' que não existem nesse formato).
+  // Detecta pela coluna _fonte gravada no Sheets e reidrata os tipos
+  // corretamente (CSV sempre traz tudo como string).
+  const fonteCol = _getCol(r,'_fonte','fonte');
+  if(fonteCol === 'grupo_interno'){
+    return _parseGrupoInternoRow(r, env);
+  }
+
   // Usar colunas Mes e Ano diretamente se disponíveis (mais preciso)
   let ano = parseInt(_getCol(r,'Ano','ANO')) || 0;
   let mes = parseInt(_getCol(r,'Mes','MES')) || 0;
