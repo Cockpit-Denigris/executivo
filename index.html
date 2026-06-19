@@ -4356,16 +4356,20 @@ function renderKpis(env,rows,rowsYTD){
   if(depto) wrap.style.gridTemplateColumns='repeat('+indsToShow.length+',1fr)'; else wrap.style.gridTemplateColumns='';
 
   indsToShow.forEach(k=>{
-    // ── Verificar se o período filtrado tem DRE em TODOS os meses presentes ──
-    // Bônus, Lucro Bruto e Resultado Departamental não existem no Grupo Interno
-    // (que só calcula MarkUp, não margem/lucro/bônus real). Se algum mês do
-    // período não tiver DRE, esses 3 indicadores mostram '—' em vez de um
-    // valor incompleto/zerado que poderia ser mal interpretado.
+    // ── Verificar se HÁ algum mês com DRE no período (não exige TODOS) ──
+    // Bônus, Lucro Bruto e Resultado Departamental não existem no Grupo Interno.
+    // Regra: somar normalmente os meses que têm DRE (Grupo Interno contribui
+    // zero nesses indicadores, sem zerar o card). Só mostrar '—' quando o
+    // filtro de mês está isolado em mês(es) específico(s) e NENHUM deles tem DRE
+    // — nesse caso não há nenhum valor parcial possível para mostrar.
+    const _mesFiltro = F[env].mes;
+    const _filtroIsolado = !_mesFiltro.has('all'); // usuário escolheu mês(es) específico(s), não "Todos"
     const _mesesNoPeriodo = [...new Set(rows.map(r=>`${r.Filial}|${r.Ano}|${r.Mês_Num}`))];
     const _mesesComDRE = new Set(rows.filter(r=>r._fonte==='dre').map(r=>`${r.Filial}|${r.Ano}|${r.Mês_Num}`));
-    const _periodoCompletoDRE = _mesesNoPeriodo.length>0 && _mesesNoPeriodo.every(mk=>_mesesComDRE.has(mk));
-    const _exigeDRECompleto = ['bon','lb','rd'].includes(k.key);
-    const _semDREsuficiente = _exigeDRECompleto && !_periodoCompletoDRE;
+    const _temAlgumDRE = _mesesComDRE.size>0;
+    const _exigeDRE = ['bon','lb','rd'].includes(k.key);
+    // Bloqueia (mostra '—') apenas se: indicador exige DRE E filtro está isolado em mês(es) específico(s) E nenhum desses meses tem DRE
+    const _semDREsuficiente = _exigeDRE && _filtroIsolado && !_temAlgumDRE;
 
     // ── Realizado em R$ (base para atingimento) ───────────────────────────
     const realPct = _semDREsuficiente ? 0
