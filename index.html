@@ -10127,40 +10127,76 @@ async function _sincronizarTudoDoSheets(){
     try{
       const dreRows = await lerDoSheets('dre', 'mb');
       if(dreRows && dreRows.length > 0){
-        // Mapeamento TIPO → campos internos do DB
-        const dreIndMap = {
+        // ── Mapeamento TIPO → chave interna ─────────────────────────────
+        // IMPORTANTE: linhas de faturamento por canal (Balcão/Telepeças vs
+        // Oficina/Funilaria) são lidas separadamente para reconstruir o
+        // campo Canal corretamente — sem isso, todas as linhas viravam
+        // 'GERAL' e o filtro por canal (Balcão/Telepeças, Oficina/Funilaria)
+        // descartava todo o DRE, sobrando só o Grupo Interno nos gráficos.
+        const TIPO_FAT_TELE  = 'receitas vendas-balção/telepçs';
+        const TIPO_FAT_OFIC  = 'receitas vendas- peças oficina';
+        const TIPO_FAT_FUNIL = 'receitas vendas-peças funilaria';
+        const dreAgregMap = {
           'receita bruta': 'RB_Real', 'receitas bruta': 'RB_Real',
-          'receitas liquidas': 'Fat_Real', 'receitas líquidas': 'Fat_Real',
+          'receitas liquidas': 'Fat_Real_TOTAL', 'receitas líquidas': 'Fat_Real_TOTAL',
           'lucro bruto': 'LB_Real_R',
           'resultado departamental': 'RD_Real_R',
           'outras receitas': 'Bon_Real',
         };
-        // Agrupar por filial|ano|mes e construir rows do DB
-        const dreMap = {};
+        const _normTipo = s => String(s||'').trim().toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+        // Agrupar por filial|ano e depois por mês — precisamos de fat_tele/fat_ofic
+        // juntos para calcular o peso de distribuição dos indicadores agregados.
+        const dreMesMap = {}; // key filial|ano|mes -> {fat_tele, fat_ofic, RB_Real, LB_Real_R, RD_Real_R, Bon_Real}
         dreRows.forEach(row => {
           const filialRawDRE = String(row.FILIAL || row.filial || '').trim();
           const filial = mapFilial(filialRawDRE) || filialRawDRE;
-          const tipo   = String(row.TIPO   || row.tipo   || '').trim().toLowerCase();
-          const ano    = parseInt(row.ano || row.ANO || 0);
-          if(!filial || !tipo || !ano) return;
-          const campo = dreIndMap[tipo];
-          if(!campo) return;
+          const tipoNorm = _normTipo(row.TIPO || row.tipo || '');
+          const ano = parseInt(row.ano || row.ANO || 0);
+          if(!filial || !tipoNorm || !ano) return;
+
+          const isFatTele  = tipoNorm===_normTipo(TIPO_FAT_TELE);
+          const isFatOfic  = tipoNorm===_normTipo(TIPO_FAT_OFIC) || tipoNorm===_normTipo(TIPO_FAT_FUNIL);
+          const campoAgreg = dreAgregMap[tipoNorm];
+          if(!isFatTele && !isFatOfic && !campoAgreg) return;
+
           for(let mes = 1; mes <= 12; mes++){
             const val = parseFloat(String(row[String(mes)] || row[mes] || 0).toString().replace(',','.')) || 0;
             if(!val) continue;
             const key = `${filial}|${ano}|${mes}`;
-            if(!dreMap[key]) dreMap[key] = { Filial: filial, Ano: ano, Mês_Num: mes, _fonte: 'dre',
-              Fat_Real:0, RB_Real:0, LB_Real_R:0, RD_Real_R:0, Bon_Real:0,
-              Fat_Plan:0, RB_Plan:0, LB_Plan_Pct:0, RD_Plan_Pct:0,
-              Canal:'GERAL', Departamento:'GERAL', Segmento:'GERAL',
-              Vendedor:'—', Nr_OS:'', Tipo_OS:'', Qtde:0, Custo:0,
-              _hasValue: false };
-            dreMap[key][campo] = val;
-            if(val !== 0) dreMap[key]._hasValue = true;
+            if(!dreMesMap[key]) dreMesMap[key] = { Filial:filial, Ano:ano, Mês_Num:mes,
+              fat_tele:0, fat_ofic:0, RB_Real:0, LB_Real_R:0, RD_Real_R:0, Bon_Real:0, _hasValue:false };
+            if(isFatTele) dreMesMap[key].fat_tele += val;
+            else if(isFatOfic) dreMesMap[key].fat_ofic += val;
+            else if(campoAgreg && campoAgreg!=='Fat_Real_TOTAL') dreMesMap[key][campoAgreg] = val;
+            dreMesMap[key]._hasValue = true;
           }
         });
-        // Só incluir meses DRE que têm pelo menos um valor real — evita bloquear DMS em meses futuros
-        const dreData = Object.values(dreMap).filter(r => r._hasValue);
+
+        // ── Gerar 2 linhas por mês (canal), distribuindo agregados por peso de fat ──
+        const dreData = [];
+        Object.values(dreMesMap).forEach(m=>{
+          if(!m._hasValue) return;
+          const fatBase = m.fat_tele + m.fat_ofic;
+          [{canal:'Telepeças/Balcão', fat:m.fat_tele}, {canal:'Oficina/Funilaria', fat:m.fat_ofic}]
+            .forEach(({canal, fat})=>{
+              if(fat===0 && fatBase===0) return; // sem nenhum fat registrado nesse mês — não criar linha vazia
+              const peso = fatBase>0 ? fat/fatBase : 0.5;
+              dreData.push({
+                Filial:m.Filial, Ano:m.Ano, Mês_Num:m.Mês_Num, _fonte:'dre',
+                Canal:canal, Departamento:canal==='Telepeças/Balcão'?'Balcão/Atacado':'Oficina',
+                Segmento:'GERAL', Vendedor:'—', Nr_OS:'', Tipo_OS:'', Qtde:0, Custo:0,
+                Fat_Real: fat,
+                RB_Real: m.RB_Real * peso,
+                LB_Real_R: m.LB_Real_R * peso,
+                RD_Real_R: m.RD_Real_R * peso,
+                Bon_Real: m.Bon_Real * peso,
+                Fat_Plan:0, RB_Plan:0, LB_Plan_Pct:0, RD_Plan_Pct:0,
+              });
+            });
+        });
+
         // Debug: check DRE months for 2026
         const dre2026 = dreData.filter(r=>r.Ano===2026);
         const dreM2026 = [...new Set(dre2026.map(r=>r.Mês_Num))].sort((a,b)=>a-b);
@@ -10168,7 +10204,7 @@ async function _sincronizarTudoDoSheets(){
         // Aplicar ao DB MB — substituir DRE antigo
         DB.mb = (DB.mb||[]).filter(r => r._fonte !== 'dre');
         DB.mb.push(...dreData);
-        console.log(`✅ DRE MB carregado do Sheets: ${dreData.length} registros`);
+        console.log(`✅ DRE MB carregado do Sheets: ${dreData.length} registros (com canal Balcão/Oficina)`);
         renderAll('mb');
       }
     } catch(eDRE){ console.warn('⚠️ Erro ao carregar DRE:', eDRE); }
