@@ -4356,11 +4356,24 @@ function renderKpis(env,rows,rowsYTD){
   if(depto) wrap.style.gridTemplateColumns='repeat('+indsToShow.length+',1fr)'; else wrap.style.gridTemplateColumns='';
 
   indsToShow.forEach(k=>{
+    // ── Verificar se o período filtrado tem DRE em TODOS os meses presentes ──
+    // Bônus, Lucro Bruto e Resultado Departamental não existem no Grupo Interno
+    // (que só calcula MarkUp, não margem/lucro/bônus real). Se algum mês do
+    // período não tiver DRE, esses 3 indicadores mostram '—' em vez de um
+    // valor incompleto/zerado que poderia ser mal interpretado.
+    const _mesesNoPeriodo = [...new Set(rows.map(r=>`${r.Filial}|${r.Ano}|${r.Mês_Num}`))];
+    const _mesesComDRE = new Set(rows.filter(r=>r._fonte==='dre').map(r=>`${r.Filial}|${r.Ano}|${r.Mês_Num}`));
+    const _periodoCompletoDRE = _mesesNoPeriodo.length>0 && _mesesNoPeriodo.every(mk=>_mesesComDRE.has(mk));
+    const _exigeDRECompleto = ['bon','lb','rd'].includes(k.key);
+    const _semDREsuficiente = _exigeDRECompleto && !_periodoCompletoDRE;
+
     // ── Realizado em R$ (base para atingimento) ───────────────────────────
-    const realPct = k.key==='lb' ? smLBPct(rows)
+    const realPct = _semDREsuficiente ? 0
+                  : k.key==='lb' ? smLBPct(rows)
                   : k.key==='rd' ? smRDPct(rows)
                   : !k.isS ? av(rows,k.fR) : 0;
-    const realR   = k.key==='rb'                    ? smRB(rows)
+    const realR   = _semDREsuficiente ? 0
+                  : k.key==='rb'                    ? smRB(rows)
                   : k.key==='lb'                     ? sm(rows,'LB_Real_R')
                   : k.key==='rd'                     ? sm(rows,'RD_Real_R')
                   : k.isS                           ? sm(rows,k.fR)
@@ -4368,7 +4381,9 @@ function renderKpis(env,rows,rowsYTD){
 
     // ── Meta em R$ (referência de atingimento) ────────────────────────────
     let planR=0, planPct=0;
-    if(k.key==='fat'){
+    if(_semDREsuficiente){
+      // Mantém planR/planPct em 0 — hasPlan ficará false, exibindo '—'
+    } else if(k.key==='fat'){
       // Receitas Vendas: D-1 — meses encerrados 100% + mês atual proporcional dias úteis
       planR = _fatPlanD1(env, rowsYTD||rows);
     } else if(k.key==='lb'){
@@ -4399,22 +4414,22 @@ function renderKpis(env,rows,rowsYTD){
     if(k.key==='lb'||k.key==='rd'){
       // Destaque: R$ grande + % discreto ao lado
       valHtml=`<div style="display:flex;align-items:baseline;gap:5px;flex-wrap:wrap">
-        <span class="k-val" style="color:${col}">${realR>0?fRFull(realR):'—'}</span>
-        <span style="font-size:12px;font-weight:700;color:${col};opacity:.75">${realPct>0?fP(realPct):''}</span>
+        <span class="k-val" style="color:${col}">${(!_semDREsuficiente&&realR>0)?fRFull(realR):'—'}</span>
+        <span style="font-size:12px;font-weight:700;color:${col};opacity:.75">${(!_semDREsuficiente&&realPct>0)?fP(realPct):''}</span>
       </div>`;
       // Meta: R$ em destaque + % entre parênteses
       metaTxt = hasPlan
         ? fRFull(planR)+(planPct>0?' <span style="font-size:10px;opacity:.7">('+fP(planPct)+')</span>':'')
         : '—';
     } else if(k.key==='rb'||k.key==='fat'||k.key==='bon'){
-      valHtml=`<div class="k-val" style="color:${col}">${realR>0?fRFull(realR):'—'}</div>`;
+      valHtml=`<div class="k-val" style="color:${col}">${(!_semDREsuficiente&&realR>0)?fRFull(realR):'—'}</div>`;
       metaTxt = hasPlan ? fRFull(planR) : '—';
     } else {
       valHtml=`<div class="k-val" style="color:${col}">${realR>0?fRFull(realR):'—'}</div>`;
       metaTxt = hasPlan ? fRFull(planR) : '—';
     }
 
-    const pctDisp = hasPlan ? p.toFixed(0)+'% '+pa(p) : 'Sem meta';
+    const pctDisp = _semDREsuficiente ? 'Aguardando DRE' : (hasPlan ? p.toFixed(0)+'% '+pa(p) : 'Sem meta');
 
     // Nota DRE: para indicadores que dependem do DRE, mostrar até qual mês está carregado
     let dreNotaHtml = '';
