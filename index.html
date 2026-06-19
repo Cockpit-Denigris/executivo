@@ -7266,6 +7266,7 @@ const FILIAL_MAP=[
   {keys:['DEMARCHI'],                                             nome:'Demarchi'},
   {keys:['LIMAO','LIMÃO'],                                        nome:'Limão'},
   {keys:['GUARULHOS','GRU'],                                      nome:'Guarulhos'},
+  {keys:['VANCENTER','VAN CENTER','VAN CENTRE'],                   nome:'Van Center'},
 ];
 function mapFilial(filialDMS){
   const f=String(filialDMS||'').toUpperCase().trim();
@@ -7559,7 +7560,9 @@ function parseGrupoInternoText(text, env){
   let filialNome='', periodoStr='', mes=0, ano=0;
   for(let i=0;i<Math.min(20,lines.length);i++){
     const l=lines[i];
-    const filM=l.match(/Filial[:\s\t]+(.+)/i);
+    // Captura só até o primeiro bloco de 2+ espaços — evita pegar "Data de Impressão"
+    // ou outro campo que esteja na mesma linha física (layout comum nesse relatório)
+    const filM=l.match(/Filial[:\s\t]+(\S(?:.*?\S)?)(?:\s{2,}|$)/i);
     if(filM) filialNome = mapFilial(filM[1].trim());
     const perM=l.match(/(\d{2}\/\d{2}\/\d{4})\s*a\s*(\d{2}\/\d{2}\/\d{4})/i);
     if(perM){
