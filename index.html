@@ -3511,11 +3511,18 @@ function normCod(v){
 const sm=(a,k)=>a.reduce((s,r)=>s+(+r[k]||0),0);
 const av=(a,k)=>a.length?sm(a,k)/a.length:0;
 const pt=(r,p)=>p>0?r/p*100:0;
-// RB = Fat.Líquido + Bônus/Outras (RB_Real pode ser zerado no DMS, recalcular)
+// RB = Fat.Líquido + Bônus/Outras (RB_Real pode ser zerado no DMS/Grupo Interno, recalcular)
+// IMPORTANTE: o cálculo é feito LINHA A LINHA, não pelo total — porque "a" pode
+// conter uma MISTURA de linhas DRE (com RB_Real preenchido) e linhas Grupo Interno/DMS
+// (com RB_Real=0) no mesmo conjunto, quando alguns meses do período têm DRE e outros não.
+// Se calculássemos pela soma total, um RB_Real>0 de meses com DRE faria a função
+// retornar só essa soma, ignorando o Fat_Real dos meses sem DRE.
 const smRB=(a)=>{
-  const rb=sm(a,'RB_Real');
-  if(rb>0) return rb; // DRE já traz RB_Real preenchido
-  return sm(a,'Fat_Real')+sm(a,'Bon_Real'); // DMS: Fat + Bon
+  return a.reduce((s,r)=>{
+    const rbLinha = +r.RB_Real||0;
+    if(rbLinha>0) return s+rbLinha; // linha DRE já traz RB_Real preenchido
+    return s+(+r.Fat_Real||0)+(+r.Bon_Real||0); // linha DMS/Grupo Interno: Fat + Bon
+  }, 0);
 };
 // LB% ponderado: LB_Real_R / RB_Real (denominador igual ao DRE: sobre Receita Bruta)
 const smLBPct=(a)=>{
@@ -4437,7 +4444,7 @@ function renderKpis(env,rows,rowsYTD){
 
     // Nota DRE: para indicadores que dependem do DRE, mostrar até qual mês está carregado
     let dreNotaHtml = '';
-    if(['rb','bon','rd'].includes(k.key)){
+    if(['rb','bon','rd','lb'].includes(k.key)){
       const dreRows = rows.filter(r=>r._fonte==='dre');
       if(dreRows.length){
         const dreMaxMes = Math.max(...dreRows.map(r=>r.Mês_Num));
